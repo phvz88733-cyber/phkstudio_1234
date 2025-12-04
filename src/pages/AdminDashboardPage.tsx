@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { BarChart, Users, Package, Settings, LogOut, AlertCircle } from 'lucide-react';
-import { User, Order } from '../types';
+import { User, Order, OrderItem } from '../types';
+import { supabase } from '../integrations/supabase/client';
 
 interface AdminDashboardPageProps {
   currentUser: User | null;
@@ -17,12 +18,69 @@ const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
   logout,
   setView,
 }) => {
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchOrders = async () => {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('orders')
+        .select(`
+          *,
+          order_items (
+            id, service_id, service_name, price, quantity, variations
+          )
+        `)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching orders:', error);
+      } else {
+        // Map the fetched data to the Order interface, ensuring 'items' is an array of OrderItem
+        const fetchedOrders: Order[] = data.map((order: any) => ({
+          ...order,
+          items: order.order_items || [], // Ensure items is an array
+          specifications: order.specifications || {}, // Ensure specifications is an object
+        }));
+        setOrders(fetchedOrders);
+      }
+      setLoading(false);
+    };
+
+    if (currentUser?.role === 'admin') {
+      fetchOrders();
+    }
+  }, [currentUser, setOrders]);
+
   if (!currentUser || currentUser.role !== 'admin') {
-    return <div className="p-12 text-center">Acceso denegado. <button onClick={() => setView('HOME')} className="text-primary">Volver</button></div>;
+    return <div className="p-12 text-center text-slate-400">Acceso denegado. <button onClick={() => setView('HOME')} className="text-primary hover:underline">Volver al inicio</button></div>;
   }
 
   const revenue = orders.filter(o => o.status === 'completed').reduce((acc, o) => acc + o.total, 0);
   const pending = orders.filter(o => o.status === 'pending').length;
+
+  const handleStatusChange = async (orderId: string, newStatus: Order['status']) => {
+    const { error } = await supabase
+      .from('orders')
+      .update({ status: newStatus })
+      .eq('id', orderId);
+
+    if (error) {
+      console.error('Error updating order status:', error);
+    } else {
+      setOrders(prevOrders => 
+        prevOrders.map(o => o.id === orderId ? { ...o, status: newStatus } : o)
+      );
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center min-h-screen">
+        <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto py-8 px-4">
@@ -52,7 +110,7 @@ const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
           <div className="p-4 bg-green-500/20 rounded-full text-green-500"><BarChart size={32} /></div>
           <div>
             <p className="text-slate-400 text-sm">Ingresos (Simulados)</p>
-            <p className="text-2xl font-bold">${revenue}</p>
+            <p className="text-2xl font-bold">${revenue.toFixed(2)}</p>
           </div>
         </div>
       </div>
@@ -76,13 +134,15 @@ const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
             <tbody className="divide-y divide-slate-800">
               {orders.map(order => (
                 <tr key={order.id} className="hover:bg-white/5 transition-colors">
-                  <td className="px-6 py-4 font-mono text-sm text-slate-400">{order.id}</td>
+                  <td className="px-6 py-4 font-mono text-sm text-slate-400">{order.id.substring(0, 8)}...</td>
                   <td className="px-6 py-4">
-                    <div className="font-medium text-white">{order.userName}</div>
-                    <div className="text-xs text-slate-500">{order.userEmail}</div>
+                    <div className="font-medium text-white">{order.user_name}</div>
+                    <div className="text-xs text-slate-500">{order.user_email}</div>
                   </td>
-                  <td className="px-6 py-4 text-sm text-slate-300">{order.items.length} items ({order.items[0]?.serviceName}...)</td>
-                  <td className="px-6 py-4 font-bold text-primary">${order.total}</td>
+                  <td className="px-6 py-4 text-sm text-slate-300">
+                    {order.items.length} items ({order.items[0]?.service_name || 'N/A'}...)
+                  </td>
+                  <td className="px-6 py-4 font-bold text-primary">${order.total.toFixed(2)}</td>
                   <td className="px-6 py-4">
                     <span className={`px-2 py-1 rounded text-xs font-bold uppercase
                       ${order.status === 'completed' ? 'bg-green-500/20 text-green-500' : 
@@ -96,12 +156,7 @@ const AdminDashboardPage: React.FC<AdminDashboardPageProps> = ({
                     <select 
                       className="bg-dark border border-slate-700 rounded px-2 py-1 text-xs text-white"
                       value={order.status}
-                      onChange={(e) => {
-                        const newStatus = e.target.value as Order['status'];
-                        const updated = orders.map(o => o.id === order.id ? { ...o, status: newStatus } : o);
-                        setOrders(updated);
-                        localStorage.setItem('phk_orders', JSON.stringify(updated));
-                      }}
+                      onChange={(e) => handleStatusChange(order.id, e.target.value as Order['status'])}
                     >
                       <option value="pending">Pendiente</option>
                       <option value="in_progress">En Progreso</option>

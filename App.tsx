@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Star } from 'lucide-react';
-import { Service, User, Order, CartItem, ToastNotification, PortfolioItem } from './types';
+import { Service, User, Order, CartItem, ToastNotification, PortfolioItem, OrderItem } from './types';
 import CookieConsent from './cookieConsent';
 import { supabase } from './src/integrations/supabase/client';
 
@@ -30,16 +30,6 @@ const INITIAL_SERVICES: Service[] = [
   { id: '6', name: 'Storyboard Profesional', category: 'STORYBOARDS', description: 'Visualización secuencial para cine, tv o publicidad.', price: 50, unit: 'frame', deliveryTime: '2-4 días', active: true, variations: ['Boceto', 'Clean Line', 'Tono'], image: 'https://picsum.photos/seed/story/800/600' },
 ];
 
-const MOCK_ADMIN: User = {
-  id: 'admin001',
-  email: 'admin@phkstudio.com', // Usar un email real para el admin mock
-  first_name: 'Admin',
-  last_name: 'Staff',
-  role: 'admin',
-  favorites: [],
-  registeredAt: new Date().toISOString()
-};
-
 // --- MAIN APPLICATION ---
 
 export default function App() {
@@ -55,7 +45,7 @@ export default function App() {
   const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [loadingAuth, setLoadingAuth] = useState(true); // Nuevo estado para la carga de autenticación
+  const [loadingAuth, setLoadingAuth] = useState(true);
 
   // Supabase Auth State Management
   useEffect(() => {
@@ -64,7 +54,7 @@ export default function App() {
         // Fetch user profile from public.profiles table
         const { data: profile, error } = await supabase
           .from('profiles')
-          .select('first_name, last_name')
+          .select('first_name, last_name, role') // Fetch the role
           .eq('id', session.user.id)
           .single();
 
@@ -78,15 +68,15 @@ export default function App() {
             email: session.user.email || '',
             first_name: profile?.first_name || '',
             last_name: profile?.last_name || '',
-            role: session.user.email === MOCK_ADMIN.email ? 'admin' : 'client', // Asignar rol de admin si coincide el email
-            favorites: [], // Esto se cargaría de la DB si existiera
+            role: profile?.role === 'admin' ? 'admin' : 'client', // Assign role from DB
+            favorites: [], // This would be loaded from DB if it existed
             registeredAt: session.user.created_at,
           });
         }
       } else {
         setCurrentUser(null);
       }
-      setLoadingAuth(false); // La carga inicial de autenticación ha terminado
+      setLoadingAuth(false);
     });
 
     // Check initial session
@@ -103,8 +93,7 @@ export default function App() {
     };
   }, []);
 
-
-  // LocalStorage Sync (for services, orders, cart - user session now handled by Supabase)
+  // Load initial services and cart from localStorage
   useEffect(() => {
     // Init Services
     const storedServices = localStorage.getItem('phk_services');
@@ -113,16 +102,13 @@ export default function App() {
       localStorage.setItem('phk_services', JSON.stringify(INITIAL_SERVICES));
       setServices(INITIAL_SERVICES);
     }
-
-    // Init Orders
-    const storedOrders = localStorage.getItem('phk_orders');
-    if (storedOrders) setOrders(JSON.parse(storedOrders));
     
     // Load Cart
     const storedCart = localStorage.getItem('phk_cart');
     if (storedCart) setCart(JSON.parse(storedCart));
   }, []);
 
+  // Sync cart to localStorage
   useEffect(() => {
     localStorage.setItem('phk_cart', JSON.stringify(cart));
   }, [cart]);
@@ -135,14 +121,6 @@ export default function App() {
   };
 
   const handleLogin = async (email: string, pass: string) => {
-    // Admin mock login (for demo purposes, in a real app, admin would also use Supabase auth)
-    if (email === MOCK_ADMIN.email && pass === 'phkstudio2025') { // Hardcoded password for mock admin
-      setCurrentUser(MOCK_ADMIN);
-      notify('Bienvenido Staff PHKStudio', 'success');
-      setIsLoginOpen(false);
-      return;
-    }
-
     const { error } = await supabase.auth.signInWithPassword({
       email,
       password: pass,

@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { Upload, Shield } from 'lucide-react';
-import { User, CartItem, Order } from '../types';
+import { User, CartItem, Order, OrderItem } from '../types';
+import { supabase } from '../integrations/supabase/client';
 
 interface CheckoutPageProps {
   currentUser: User | null;
@@ -21,62 +22,141 @@ const CheckoutPage: React.FC<CheckoutPageProps> = ({
   setIsLoginOpen,
   setView,
 }) => {
-  const [step, setStep] = useState(1); // Not used for visual steps, but could be for validation
+  const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: currentUser?.first_name || currentUser?.email.split('@')[0] || '',
     email: currentUser?.email || '',
     phone: currentUser?.phone || '',
     style: 'Realista',
-    software: [],
+    software: [], // This could be a multi-select in a real app
     budget: '$100-500',
     specs: '',
     paymentMethod: 'credit_card'
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [files, setFiles] = useState<string[]>([]);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [fileNames, setFileNames] = useState<string[]>([]);
 
   const total = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      const newFiles = Array.from(e.target.files).map(f => f.name);
-      setFiles(prev => [...prev, ...newFiles].slice(0, 3));
+      const newFiles = Array.from(e.target.files);
+      setSelectedFiles(prev => [...prev, ...newFiles].slice(0, 3)); // Limit to 3 files
+      setFileNames(prev => [...prev, ...newFiles.map(f => f.name)].slice(0, 3));
     }
   };
 
-  const submitOrder = () => {
+  const uploadFiles = async (userId: string, orderId: string): Promise<string[]> => {
+    const uploadedFileUrls: string[] = [];
+    for (const file of selectedFiles) {
+      const fileExtension = file.name.split('.').pop();
+      const filePath = `${userId}/${orderId}/${Date.now()}.${fileExtension}`;
+      const { data, error } = await supabase.storage
+        .from('order-attachments')
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: false,
+        });
+
+      if (error) {
+        notify(`Error al subir el archivo ${file.name}: ${error.message}`, 'error');
+        console.error('Error uploading file:', error);
+      } else {
+        const { data: publicUrlData } = supabase.storage
+          .from('order-attachments')
+          .getPublicUrl(filePath);
+        if (publicUrlData) {
+          uploadedFileUrls.push(publicUrlData.publicUrl);
+        }
+      }
+    }
+    return uploadedFileUrls;
+  };
+
+  const submitOrder = async () => {
     if (!currentUser) {
       notify('Debes iniciar sesión para completar el pedido', 'error');
       setIsLoginOpen(true);
       return;
     }
 
-    const newOrder: Order = {
-      id: `ORD-${Date.now()}`,
-      userId: currentUser.id,
-      userEmail: formData.email,
-      userName: formData.name,
-      date: new Date().toISOString(),
-      items: [...cart],
-      total,
-      status: 'pending',
-      priority: 'normal',
-      specifications: {
-        style: formData.style,
-        software: [], // Simplified for demo
-        description: formData.specs,
-        budgetRange: formData.budget,
-        files
-      }
-    };
+    if (cart.length === 0) {
+      notify('Tu carrito está vacío. Añade servicios antes de procesar el pago.', 'error');
+      setView('SERVICES');
+      return;
+    }
 
-    const existingOrders = JSON.parse(localStorage.getItem('phk_orders') || '[]');
-    const updatedOrders = [...existingOrders, newOrder];
-    localStorage.setItem('phk_orders', JSON.stringify(updatedOrders));
-    setOrders(updatedOrders);
-    setCart([]);
-    notify('¡Pedido enviado con éxito!', 'success');
-    setView('PROFILE');
+    setLoading(true);
+    try {
+      // 1. Upload files to Supabase Storage
+      const uploadedFileUrls = await uploadFiles(currentUser.id, `ORD-${Date.now()}`); // Temporary ID for path
+
+      // 2. Insert order into public.orders table
+      const { data: orderData, error: orderError } = await supabase
+        .from('orders')
+        .insert({
+          user_id: currentUser.id,
+          user_email: formData.email,
+          user_name: formData.name,
+          total: total,
+          status: 'pending',
+          priority: 'normal',
+          specifications: {
+            style: formData.style,
+            software: formData.software,
+            description: formData.specs,
+            budgetRange: formData.budget,
+            files: uploadedFileUrls,
+          },
+          notes: '', // Add notes if you have a field for it
+        })
+        .select()
+        .single();
+
+      if (orderError) {
+        notify(`Error al crear el pedido: ${orderError.message}`, 'error');
+        console.error('Error creating order:', orderError);
+        return;
+      }
+
+      // 3. Insert order items into public.order_items table
+      const orderItemsToInsert: Omit<OrderItem, 'id'>[] = cart.map(item => ({
+        order_id: orderData.id,
+        service_id: item.serviceId,
+        service_name: item.serviceName,
+        price: item.price,
+        quantity: item.quantity,
+        variations: item.variations,
+      }));
+
+      const { error: orderItemsError } = await supabase
+        .from('order_items')
+        .insert(orderItemsToInsert);
+
+      if (orderItemsError) {
+        notify(`Error al añadir ítems al pedido: ${orderItemsError.message}`, 'error');
+        console.error('Error adding order items:', orderItemsError);
+        return;
+      }
+
+      // Update local state and clear cart
+      const newOrder: Order = {
+        ...orderData,
+        items: orderItemsToInsert as OrderItem[], // Cast for local state consistency
+        specifications: orderData.specifications as Order['specifications'], // Ensure correct type
+      };
+      setOrders(prev => [...prev, newOrder]);
+      setCart([]);
+      notify('¡Pedido enviado con éxito!', 'success');
+      setView('PROFILE');
+
+    } catch (error: any) {
+      notify(`Ocurrió un error inesperado: ${error.message}`, 'error');
+      console.error('Unexpected error during checkout:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -129,11 +209,11 @@ const CheckoutPage: React.FC<CheckoutPageProps> = ({
                 <Upload className="mx-auto mb-2 text-slate-400" />
                 <p className="text-sm text-slate-400">Arrastra archivos o haz clic para subir referencias</p>
                 <p className="text-xs text-slate-600 mt-1">(Máx 3 archivos, JPG/PNG/PDF)</p>
-                <input type="file" ref={fileInputRef} className="hidden" multiple onChange={handleFileChange} />
+                <input type="file" ref={fileInputRef} className="hidden" multiple onChange={handleFileChange} accept=".jpg,.jpeg,.png,.pdf" />
               </div>
-              {files.length > 0 && (
+              {fileNames.length > 0 && (
                 <div className="flex gap-2 flex-wrap">
-                  {files.map((f, i) => <span key={i} className="text-xs bg-slate-800 px-2 py-1 rounded text-slate-300">{f}</span>)}
+                  {fileNames.map((f, i) => <span key={i} className="text-xs bg-slate-800 px-2 py-1 rounded text-slate-300">{f}</span>)}
                 </div>
               )}
             </div>
@@ -179,9 +259,17 @@ const CheckoutPage: React.FC<CheckoutPageProps> = ({
             </div>
             <button 
               onClick={submitOrder}
-              className="w-full bg-gradient-to-r from-primary to-blue-600 hover:from-blue-500 hover:to-blue-700 text-white font-bold py-4 rounded shadow-lg transform transition-all hover:scale-[1.02]"
+              disabled={loading || cart.length === 0}
+              className="w-full bg-gradient-to-r from-primary to-blue-600 hover:from-blue-500 hover:to-blue-700 text-white font-bold py-4 rounded shadow-lg transform transition-all hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              CONFIRMAR PEDIDO
+              {loading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  Procesando...
+                </span>
+              ) : (
+                'CONFIRMAR PEDIDO'
+              )}
             </button>
             <p className="text-xs text-center text-slate-500 mt-4">
               <Shield size={12} className="inline mr-1" />

@@ -16,14 +16,15 @@ export interface Service {
 export interface User {
   id: string;
   email: string;
-  first_name?: string; // Usaremos first_name y last_name de la tabla profiles
+  first_name?: string;
   last_name?: string;
   phone?: string;
-  role: 'client' | 'admin'; // 'admin' será un rol manejado localmente por ahora
+  role: 'client' | 'admin'; // Ahora se obtiene de la tabla profiles
   favorites: string[]; // Service IDs
   registeredAt: string;
 }
 
+// Interfaz para los ítems en el carrito (client-side)
 export interface CartItem {
   serviceId: string;
   serviceName: string;
@@ -32,13 +33,25 @@ export interface CartItem {
   variations?: string;
 }
 
+// Interfaz para los ítems de pedido almacenados en la DB (order_items)
+export interface OrderItem {
+  id?: string; // Opcional para cuando se crea
+  order_id?: string; // Opcional para cuando se crea
+  service_id: string;
+  service_name: string;
+  price: number;
+  quantity: number;
+  variations?: string;
+}
+
+// Interfaz para los pedidos almacenados en la DB (orders)
 export interface Order {
   id: string;
-  userId: string;
-  userEmail: string;
-  userName: string;
-  date: string;
-  items: CartItem[];
+  user_id: string;
+  user_email: string;
+  user_name: string;
+  created_at: string;
+  items: OrderItem[]; // Se cargará por separado o se unirá en el frontend
   total: number;
   status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
   priority: 'normal' | 'urgent';
@@ -47,7 +60,7 @@ export interface Order {
     software: string[];
     description: string;
     budgetRange: string;
-    files: string[]; // File names (simulated)
+    files: string[]; // URLs de los archivos subidos
   };
   notes?: string;
 }

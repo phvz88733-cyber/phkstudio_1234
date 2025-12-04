@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ArrowRight, Shield, Lock, CheckCircle, CreditCard } from 'lucide-react';
-import { CustomRequestData, User, Order } from '../types';
+import { CustomRequestData, User, Order, OrderItem } from '../types';
+import { supabase } from '../integrations/supabase/client';
 
 interface CustomServiceSectionProps {
   currentUser: User | null;
@@ -24,7 +25,7 @@ const CustomServiceSection: React.FC<CustomServiceSectionProps> = ({ currentUser
     'Motion Graphics Corporativo', 'Stop Motion Digital'
   ];
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (step === 1) {
       if (!requestData.style || !requestData.description) {
         notify('Por favor completa todos los campos del proyecto', 'error');
@@ -32,6 +33,11 @@ const CustomServiceSection: React.FC<CustomServiceSectionProps> = ({ currentUser
       }
       setStep(2);
     } else if (step === 2) {
+      if (!currentUser) {
+        notify('Debes iniciar sesión para enviar una solicitud personalizada', 'error');
+        return;
+      }
+
       // Validate Payment
       if (requestData.paymentMethod === 'card') {
          if (!requestData.cardDetails?.number || !requestData.cardDetails?.cvc) {
@@ -41,35 +47,73 @@ const CustomServiceSection: React.FC<CustomServiceSectionProps> = ({ currentUser
       }
       
       setLoading(true);
-      setTimeout(() => {
-        setLoading(false);
-        setStep(3);
-        
-        // Create a mock order for this custom request
-        if (currentUser) {
-          const newOrder: Order = {
-            id: `CUST-${Date.now()}`,
-            userId: currentUser.id,
-            userEmail: currentUser.email,
-            userName: currentUser.first_name || currentUser.email, // Usar first_name si existe
-            date: new Date().toISOString(),
-            items: [{ serviceId: 'custom', serviceName: `Custom: ${requestData.style}`, price: 100, quantity: 1 }],
-            total: 100, // Deposit fee
+      try {
+        // Create a mock order for this custom request in Supabase
+        const depositAmount = 100; // Initial deposit fee
+
+        const { data: orderData, error: orderError } = await supabase
+          .from('orders')
+          .insert({
+            user_id: currentUser.id,
+            user_email: currentUser.email,
+            user_name: currentUser.first_name || currentUser.email,
+            total: depositAmount,
             status: 'pending',
             priority: 'urgent',
             specifications: {
               style: requestData.style,
-              software: [],
+              software: [], // No software specified for custom request initially
               description: requestData.description,
               budgetRange: 'Custom Quote',
-              files: []
-            }
-          };
-          const existingOrders = JSON.parse(localStorage.getItem('phk_orders') || '[]');
-          localStorage.setItem('phk_orders', JSON.stringify([...existingOrders, newOrder]));
-          setOrders([...existingOrders, newOrder]);
+              files: [], // No files uploaded in this section
+            },
+            notes: 'Solicitud de servicio personalizado - Depósito inicial',
+          })
+          .select()
+          .single();
+
+        if (orderError) {
+          notify(`Error al crear la solicitud personalizada: ${orderError.message}`, 'error');
+          console.error('Error creating custom order:', orderError);
+          return;
         }
-      }, 2000);
+
+        // Insert a single item for the custom request deposit
+        const orderItemToInsert: Omit<OrderItem, 'id'> = {
+          order_id: orderData.id,
+          service_id: 'custom-deposit',
+          service_name: `Depósito: ${requestData.style}`,
+          price: depositAmount,
+          quantity: 1,
+          variations: 'Depósito inicial',
+        };
+
+        const { error: orderItemError } = await supabase
+          .from('order_items')
+          .insert(orderItemToInsert);
+
+        if (orderItemError) {
+          notify(`Error al añadir el depósito al pedido: ${orderItemError.message}`, 'error');
+          console.error('Error adding custom order item:', orderItemError);
+          return;
+        }
+
+        const newOrder: Order = {
+          ...orderData,
+          items: [orderItemToInsert as OrderItem], // Cast for local state consistency
+          specifications: orderData.specifications as Order['specifications'],
+        };
+        setOrders(prev => [...prev, newOrder]);
+        
+        setStep(3);
+        notify('¡Solicitud personalizada enviada con éxito!', 'success');
+
+      } catch (error: any) {
+        notify(`Ocurrió un error inesperado: ${error.message}`, 'error');
+        console.error('Unexpected error during custom request:', error);
+      } finally {
+        setLoading(false);
+      }
     }
   };
 
