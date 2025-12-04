@@ -149,7 +149,7 @@ const CheckoutPage: React.FC<CheckoutPageProps> = ({
       setOrders(prev => [...prev, newOrder]);
       setCart([]);
       notify('¡Pedido enviado con éxito!', 'success');
-      setView('PROFILE');
+      setView('HOME'); // Navegar a la página principal después de la transacción
 
     } catch (error: any) {
       notify(`Ocurrió un error inesperado: ${error.message}`, 'error');

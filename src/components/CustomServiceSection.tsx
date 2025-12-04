@@ -281,15 +281,30 @@ const CustomServiceSection: React.FC<CustomServiceSectionProps> = ({ currentUser
                   <p className="text-sm text-slate-400 mb-2">Concepto: <span className="text-white">Depósito Proyecto Personalizado</span></p>
                   <p className="text-sm text-slate-400">Total Pagado: <span className="text-green-400 font-bold">$100.00 USD</span></p>
                 </div>
-                <button 
-                  onClick={() => {
-                    setStep(1);
-                    setRequestData({ style: '', description: '', paymentMethod: 'card', cardDetails: { number: '', expiry: '', cvc: '', holder: '' } });
-                  }}
-                  className="bg-primary hover:bg-blue-600 text-white font-bold py-3 px-8 rounded transition-all"
-                >
-                  SOLICITAR OTRO PROYECTO
-                </button>
+                <div className="flex flex-col md:flex-row gap-4 justify-center">
+                  <button 
+                    onClick={() => {
+                      setStep(1);
+                      setRequestData({ style: '', description: '', paymentMethod: 'card', cardDetails: { number: '', expiry: '', cvc: '', holder: '' } });
+                    }}
+                    className="bg-primary hover:bg-blue-600 text-white font-bold py-3 px-8 rounded transition-all"
+                  >
+                    SOLICITAR OTRO PROYECTO
+                  </button>
+                  <button 
+                    onClick={() => {
+                      setStep(1);
+                      setRequestData({ style: '', description: '', paymentMethod: 'card', cardDetails: { number: '', expiry: '', cvc: '', holder: '' } });
+                      // @ts-ignore - setView is not directly available here, but we can simulate it via props if needed.
+                      // For now, assuming setView is passed down or handled by parent.
+                      // If setView is not available, this button would need to be handled by the parent component.
+                      window.location.href = '/'; // Simple refresh to home for now
+                    }}
+                    className="bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 px-8 rounded transition-all"
+                  >
+                    Volver al Inicio
+                  </button>
+                </div>
               </div>
             )}
           </div>

@@ -49,6 +49,8 @@ export default function App() {
 
   // Supabase Auth State Management
   useEffect(() => {
+    setLoadingAuth(true); // Asegura que el estado de carga sea true al inicio del efecto
+
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session) {
         // Fetch user profile from public.profiles table
@@ -77,22 +79,13 @@ export default function App() {
       } else {
         setCurrentUser(null);
       }
-      setLoadingAuth(false);
-    });
-
-    // Check initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-        // onAuthStateChange will handle setting currentUser
-      } else {
-        setLoadingAuth(false);
-      }
+      setLoadingAuth(false); // Set loading to false after processing any auth event
     });
 
     return () => {
       authListener.subscription.unsubscribe();
     };
-  }, []);
+  }, []); // Empty dependency array means it runs once on mount
 
   // Load initial services and cart from localStorage
   useEffect(() => {
