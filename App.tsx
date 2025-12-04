@@ -72,6 +72,7 @@ export default function App() {
             favorites: [], // This would be loaded from DB if it existed
             registeredAt: session.user.created_at,
           });
+          setIsLoginOpen(false); // Close login modal on successful session
         }
       } else {
         setCurrentUser(null);
@@ -130,7 +131,7 @@ export default function App() {
       notify(`Error al iniciar sesión: ${error.message}`, 'error');
     } else {
       notify('Inicio de sesión exitoso', 'success');
-      setIsLoginOpen(false);
+      // setIsLoginOpen(false); // Removed: now handled by onAuthStateChange
     }
   };
 
@@ -150,10 +151,10 @@ export default function App() {
       notify(`Error al registrarse: ${error.message}`, 'error');
     } else if (data.user) {
       notify('Registro exitoso. Por favor, revisa tu correo para verificar tu cuenta.', 'success');
-      setIsLoginOpen(false);
+      // setIsLoginOpen(false); // Removed: now handled by onAuthStateChange
     } else {
       notify('Registro iniciado. Por favor, verifica tu correo electrónico.', 'info');
-      setIsLoginOpen(false);
+      // setIsLoginOpen(false); // Removed: now handled by onAuthStateChange
     }
   };
 
