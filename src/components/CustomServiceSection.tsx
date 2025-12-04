@@ -60,6 +60,7 @@ const CustomServiceSection: React.FC<CustomServiceSectionProps> = ({ currentUser
             total: depositAmount,
             status: 'pending',
             priority: 'urgent',
+            payment_method: requestData.paymentMethod === 'card' ? 'credit_card' : 'paypal', // Añadido el método de pago
             specifications: {
               style: requestData.style,
               software: [], // No software specified for custom request initially

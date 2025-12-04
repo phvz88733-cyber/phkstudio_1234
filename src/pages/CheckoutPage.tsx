@@ -102,6 +102,7 @@ const CheckoutPage: React.FC<CheckoutPageProps> = ({
           total: total,
           status: 'pending',
           priority: 'normal',
+          payment_method: formData.paymentMethod, // Añadido el método de pago
           specifications: {
             style: formData.style,
             software: formData.software,

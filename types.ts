@@ -55,6 +55,7 @@ export interface Order {
   total: number;
   status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
   priority: 'normal' | 'urgent';
+  payment_method?: 'credit_card' | 'paypal'; // Nuevo campo para el método de pago
   specifications: {
     style: string;
     software: string[];
