@@ -1,4 +1,3 @@
-
 export type ServiceCategory = 'ILUSTRACIÓN DIGITAL' | 'ANIMACIÓN 2D' | 'ANIMACIÓN 3D' | 'MOTION GRAPHICS' | 'CHARACTER DESIGN' | 'STORYBOARDS';
 
 export interface Service {
@@ -17,10 +16,10 @@ export interface Service {
 export interface User {
   id: string;
   email: string;
-  password?: string; // In real app, never store plain text
-  name: string;
+  first_name?: string; // Usaremos first_name y last_name de la tabla profiles
+  last_name?: string;
   phone?: string;
-  role: 'client' | 'admin';
+  role: 'client' | 'admin'; // 'admin' será un rol manejado localmente por ahora
   favorites: string[]; // Service IDs
   registeredAt: string;
 }

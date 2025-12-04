@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   ShoppingCart, Menu, X, User as UserIcon, LogIn, Search, Star, 
@@ -9,6 +8,7 @@ import {
 } from 'lucide-react';
 import { Service, User, Order, CartItem, ToastNotification, ServiceCategory, CustomRequestData, PortfolioItem } from './types';
 import CookieConsent from './cookieConsent';
+import { supabase } from './src/integrations/supabase/client'; // Importar el cliente de Supabase
 
 // --- MOCK DATA GENERATORS ---
 
@@ -37,9 +37,9 @@ const MOCK_PORTFOLIO: PortfolioItem[] = [
 
 const MOCK_ADMIN: User = {
   id: 'admin001',
-  email: 'admin', // Simplified for prompt requirements
-  password: 'phkstudio2025',
-  name: 'Admin Staff',
+  email: 'admin@phkstudio.com', // Usar un email real para el admin mock
+  first_name: 'Admin',
+  last_name: 'Staff',
   role: 'admin',
   favorites: [],
   registeredAt: new Date().toISOString()
@@ -74,8 +74,56 @@ export default function App() {
   const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [loadingAuth, setLoadingAuth] = useState(true); // Nuevo estado para la carga de autenticación
 
-  // LocalStorage Sync
+  // Supabase Auth State Management
+  useEffect(() => {
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session) {
+        // Fetch user profile from public.profiles table
+        const { data: profile, error } = await supabase
+          .from('profiles')
+          .select('first_name, last_name')
+          .eq('id', session.user.id)
+          .single();
+
+        if (error) {
+          console.error('Error fetching profile:', error);
+          notify('Error al cargar el perfil del usuario.', 'error');
+          setCurrentUser(null);
+        } else {
+          setCurrentUser({
+            id: session.user.id,
+            email: session.user.email || '',
+            first_name: profile?.first_name || '',
+            last_name: profile?.last_name || '',
+            role: session.user.email === MOCK_ADMIN.email ? 'admin' : 'client', // Asignar rol de admin si coincide el email
+            favorites: [], // Esto se cargaría de la DB si existiera
+            registeredAt: session.user.created_at,
+          });
+        }
+      } else {
+        setCurrentUser(null);
+      }
+      setLoadingAuth(false); // La carga inicial de autenticación ha terminado
+    });
+
+    // Check initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        // onAuthStateChange will handle setting currentUser
+      } else {
+        setLoadingAuth(false);
+      }
+    });
+
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
+
+
+  // LocalStorage Sync (for services, orders, cart - user session now handled by Supabase)
   useEffect(() => {
     // Init Services
     const storedServices = localStorage.getItem('phk_services');
@@ -88,10 +136,6 @@ export default function App() {
     // Init Orders
     const storedOrders = localStorage.getItem('phk_orders');
     if (storedOrders) setOrders(JSON.parse(storedOrders));
-
-    // Check User Session
-    const storedUser = localStorage.getItem('phk_user_session');
-    if (storedUser) setCurrentUser(JSON.parse(storedUser));
     
     // Load Cart
     const storedCart = localStorage.getItem('phk_cart');
@@ -109,61 +153,60 @@ export default function App() {
     setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 4000);
   };
 
-  const handleLogin = (email: string, pass: string) => {
-    if (email === MOCK_ADMIN.email && pass === MOCK_ADMIN.password) {
+  const handleLogin = async (email: string, pass: string) => {
+    // Admin mock login (for demo purposes, in a real app, admin would also use Supabase auth)
+    if (email === MOCK_ADMIN.email && pass === 'phkstudio2025') { // Hardcoded password for mock admin
       setCurrentUser(MOCK_ADMIN);
-      localStorage.setItem('phk_user_session', JSON.stringify(MOCK_ADMIN));
       notify('Bienvenido Staff PHKStudio', 'success');
       setIsLoginOpen(false);
       return;
     }
-    
-    const usersStr = localStorage.getItem('phk_users');
-    const users: User[] = usersStr ? JSON.parse(usersStr) : [];
-    const user = users.find(u => u.email === email && u.password === pass);
-    
-    if (user) {
-      setCurrentUser(user);
-      localStorage.setItem('phk_user_session', JSON.stringify(user));
-      notify(`Bienvenido de nuevo, ${user.name}`, 'success');
+
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password: pass,
+    });
+
+    if (error) {
+      notify(`Error al iniciar sesión: ${error.message}`, 'error');
+    } else {
+      notify('Inicio de sesión exitoso', 'success');
+      setIsLoginOpen(false);
+    }
+  };
+
+  const handleRegister = async (first_name: string, last_name: string, email: string, pass: string) => {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password: pass,
+      options: {
+        data: {
+          first_name,
+          last_name,
+        },
+      },
+    });
+
+    if (error) {
+      notify(`Error al registrarse: ${error.message}`, 'error');
+    } else if (data.user) {
+      notify('Registro exitoso. Por favor, revisa tu correo para verificar tu cuenta.', 'success');
       setIsLoginOpen(false);
     } else {
-      notify('Credenciales inválidas', 'error');
+      notify('Registro iniciado. Por favor, verifica tu correo electrónico.', 'info');
+      setIsLoginOpen(false);
     }
   };
 
-  const handleRegister = (name: string, email: string, pass: string) => {
-    const usersStr = localStorage.getItem('phk_users');
-    const users: User[] = usersStr ? JSON.parse(usersStr) : [];
-    
-    if (users.find(u => u.email === email)) {
-      notify('El email ya está registrado', 'error');
-      return;
+  const logout = async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      notify(`Error al cerrar sesión: ${error.message}`, 'error');
+    } else {
+      setCurrentUser(null);
+      setView('HOME');
+      notify('Sesión cerrada', 'info');
     }
-
-    const newUser: User = {
-      id: `usr_${Date.now()}`,
-      name,
-      email,
-      password: pass, // Insecure for demo
-      role: 'client',
-      registeredAt: new Date().toISOString(),
-      favorites: []
-    };
-
-    users.push(newUser);
-    localStorage.setItem('phk_users', JSON.stringify(users));
-    setCurrentUser(newUser);
-    localStorage.setItem('phk_user_session', JSON.stringify(newUser));
-    notify('Registro exitoso. ¡Bienvenido!', 'success');
-    setIsLoginOpen(false);
-  };
-
-  const logout = () => {
-    setCurrentUser(null);
-    localStorage.removeItem('phk_user_session');
-    setView('HOME');
-    notify('Sesión cerrada', 'info');
   };
 
   const addToCart = (service: Service) => {
@@ -220,11 +263,13 @@ export default function App() {
               )}
             </button>
             
-            {currentUser ? (
+            {loadingAuth ? (
+              <div className="w-8 h-8 rounded-full bg-slate-700 animate-pulse"></div> // Loading spinner
+            ) : currentUser ? (
               <div className="relative group">
                 <button onClick={() => setView('PROFILE')} className="flex items-center gap-2 text-slate-300 hover:text-white">
                   <UserIcon size={24} />
-                  <span className="hidden md:inline">{currentUser.name.split(' ')[0]}</span>
+                  <span className="hidden md:inline">{currentUser.first_name || currentUser.email.split('@')[0]}</span>
                 </button>
               </div>
             ) : (
@@ -332,7 +377,7 @@ export default function App() {
               id: `CUST-${Date.now()}`,
               userId: currentUser.id,
               userEmail: currentUser.email,
-              userName: currentUser.name,
+              userName: currentUser.first_name || currentUser.email, // Usar first_name si existe
               date: new Date().toISOString(),
               items: [{ serviceId: 'custom', serviceName: `Custom: ${requestData.style}`, price: 100, quantity: 1 }],
               total: 100, // Deposit fee
@@ -733,7 +778,7 @@ export default function App() {
   const Checkout = () => {
     const [step, setStep] = useState(1);
     const [formData, setFormData] = useState({
-      name: currentUser?.name || '',
+      name: currentUser?.first_name || currentUser?.email.split('@')[0] || '',
       email: currentUser?.email || '',
       phone: currentUser?.phone || '',
       style: 'Realista',
@@ -1015,10 +1060,10 @@ export default function App() {
       <div className="max-w-5xl mx-auto py-12 px-4">
         <div className="flex items-center gap-6 mb-12">
           <div className="w-24 h-24 bg-primary rounded-full flex items-center justify-center text-4xl font-bold text-white shadow-lg">
-            {currentUser.name.charAt(0)}
+            {currentUser.first_name ? currentUser.first_name.charAt(0) : currentUser.email.charAt(0)}
           </div>
           <div>
-            <h2 className="text-3xl font-orbitron font-bold text-white">{currentUser.name}</h2>
+            <h2 className="text-3xl font-orbitron font-bold text-white">{currentUser.first_name} {currentUser.last_name}</h2>
             <p className="text-slate-400">{currentUser.email}</p>
             <button onClick={logout} className="mt-2 text-sm text-secondary hover:underline">Cerrar Sesión</button>
           </div>
@@ -1060,7 +1105,8 @@ export default function App() {
     const [isRegister, setIsRegister] = useState(false);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    const [name, setName] = useState('');
+    const [firstName, setFirstName] = useState('');
+    const [lastName, setLastName] = useState('');
 
     if (!isLoginOpen) return null;
 
@@ -1073,12 +1119,20 @@ export default function App() {
           </div>
           <div className="p-8 space-y-4">
             {isRegister && (
-              <input 
-                type="text" 
-                placeholder="Nombre Completo" 
-                className="w-full bg-dark border border-slate-700 p-3 rounded text-white focus:border-primary focus:outline-none"
-                value={name} onChange={e => setName(e.target.value)}
-              />
+              <>
+                <input 
+                  type="text" 
+                  placeholder="Nombre" 
+                  className="w-full bg-dark border border-slate-700 p-3 rounded text-white focus:border-primary focus:outline-none"
+                  value={firstName} onChange={e => setFirstName(e.target.value)}
+                />
+                <input 
+                  type="text" 
+                  placeholder="Apellido" 
+                  className="w-full bg-dark border border-slate-700 p-3 rounded text-white focus:border-primary focus:outline-none"
+                  value={lastName} onChange={e => setLastName(e.target.value)}
+                />
+              </>
             )}
             <input 
               type="email" 
@@ -1093,7 +1147,7 @@ export default function App() {
               value={password} onChange={e => setPassword(e.target.value)}
             />
             <button 
-              onClick={() => isRegister ? handleRegister(name, email, password) : handleLogin(email, password)}
+              onClick={() => isRegister ? handleRegister(firstName, lastName, email, password) : handleLogin(email, password)}
               className="w-full bg-primary hover:bg-blue-600 text-white font-bold py-3 rounded transition-all transform hover:scale-[1.02]"
             >
               {isRegister ? 'REGISTRARSE' : 'ENTRAR'}
